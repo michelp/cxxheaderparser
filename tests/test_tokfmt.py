@@ -11,6 +11,7 @@ from cxxheaderparser.tokfmt import tokfmt
         "unsigned int",
         "::uint8_t",
         "void *",
+        "void * *",
         "const char *",
         "const char[]",
         "void * (*)()",
