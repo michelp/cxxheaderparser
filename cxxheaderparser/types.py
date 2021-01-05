@@ -1,26 +1,6 @@
 import typing
 from dataclasses import dataclass, field
-
-
-@dataclass
-class Token:
-    """
-    In an ideal world, this Token class would not be exposed via the user
-    visible API. Unfortunately, getting to that point would take a significant
-    amount of effort.
-
-    It is not expected that these will change, but they might.
-
-    At the moment, the only supported use of Token objects are in conjunction
-    with the ``tokfmt`` function. As this library matures, we'll try to clarify
-    the expectations around these. File an issue on github if you have ideas!
-    """
-
-    #: Raw value of the token
-    value: str
-
-    #: Lex type of the token
-    type: str = field(repr=False, compare=False, default="")
+from .tokfmt import tokfmt, Token
 
 
 @dataclass
@@ -36,6 +16,9 @@ class Value:
 
     #: Tokens corresponding to the value
     tokens: typing.List[Token]
+
+    def __str__(self) -> str:
+        return tokfmt(self.tokens)
 
 
 @dataclass
@@ -71,6 +54,9 @@ class DecltypeSpecifier:
     #: Unparsed tokens within the decltype
     tokens: typing.List[Token]
 
+    def __str__(self) -> str:
+        return f"decltype({tokfmt(self.tokens)})"
+
 
 @dataclass
 class FundamentalSpecifier:
@@ -79,6 +65,9 @@ class FundamentalSpecifier:
     """
 
     name: str
+
+    def __str__(self) -> str:
+        return self.name
 
 
 @dataclass
@@ -97,6 +86,12 @@ class NameSpecifier:
 
     specialization: typing.Optional["TemplateSpecialization"] = None
 
+    def __str__(self) -> str:
+        if self.specialization:
+            return f"{self.name}{self.specialization}"
+        else:
+            return self.name
+
 
 @dataclass
 class AutoSpecifier:
@@ -105,6 +100,9 @@ class AutoSpecifier:
     """
 
     name: str = "auto"
+
+    def __str__(self) -> str:
+        return self.name
 
 
 @dataclass
@@ -117,6 +115,10 @@ class AnonymousName:
 
     #: Unique id associated with this name (only unique per parser instance!)
     id: int
+
+    def __str__(self) -> str:
+        # TODO: not sure what makes sense here, subject to change
+        return f"<<id={self.id}>>"
 
 
 PQNameSegment = typing.Union[
@@ -140,6 +142,12 @@ class PQName:
     #: Set if the name starts with class/enum/struct
     classkey: typing.Optional[str] = None
 
+    def __str__(self) -> str:
+        if self.classkey:
+            return f"{self.classkey} {'::'.join(map(str, self.segments))}"
+        else:
+            return "::".join(map(str, self.segments))
+
 
 @dataclass
 class TemplateArgument:
@@ -161,6 +169,11 @@ class TemplateArgument:
     has_typename: bool = False
     param_pack: bool = False
 
+    def __str__(self):
+        tn = "typename " if self.has_typename else ""
+        pp = "..." if self.param_pack else ""
+        return f"{tn}{self.arg}{pp}"
+
 
 @dataclass
 class TemplateSpecialization:
@@ -175,6 +188,9 @@ class TemplateSpecialization:
     """
 
     args: typing.List[TemplateArgument]
+
+    def __str__(self):
+        return f"<{', '.join(map(str, self.args))}>"
 
 
 @dataclass
@@ -200,6 +216,25 @@ class FunctionType:
     #: whatever the trailing return type was
     has_trailing_return: bool = False
 
+    def __format__(self, name: str) -> str:
+        if not name:
+            return self.__str__()
+
+        vararg = "..." if self.vararg else ""
+        if self.has_trailing_return:
+            return f"auto {name}({', '.join(map(str, self.parameters))}{vararg}) -> {self.return_type}"
+        else:
+            return f"{self.return_type} {name}({', '.join(map(str, self.parameters))}{vararg})"
+
+    def __str__(self) -> str:
+        vararg = "..." if self.vararg else ""
+        if self.has_trailing_return:
+            return f"auto ({', '.join(map(str, self.parameters))}{vararg}) -> {self.return_type}"
+        else:
+            return (
+                f"{self.return_type} ({', '.join(map(str, self.parameters))}{vararg})"
+            )
+
 
 @dataclass
 class Type:
@@ -211,6 +246,17 @@ class Type:
 
     const: bool = False
     volatile: bool = False
+
+    def __format__(self, name: str) -> str:
+        s = self.__str__()
+        if not name:
+            return s
+        return f"{s} {name}"
+
+    def __str__(self) -> str:
+        c = "const " if self.const else ""
+        v = "volatile " if self.volatile else ""
+        return f"{c}{v}{self.typename}"
 
 
 @dataclass
@@ -231,6 +277,17 @@ class Array:
     #:          ~~
     size: typing.Optional[Value]
 
+    def __format__(self, name: str) -> str:
+        if not name:
+            return self.__str__()
+
+        s = self.size if self.size else ""
+        return f"{self.array_of} {name}[{s}]"
+
+    def __str__(self) -> str:
+        s = self.size if self.size else ""
+        return f"{self.array_of}[{s}]"
+
 
 @dataclass
 class Pointer:
@@ -244,6 +301,30 @@ class Pointer:
     const: bool = False
     volatile: bool = False
 
+    def __fmt(self) -> str:
+        c = " const" if self.const else ""
+        v = " volatile" if self.volatile else ""
+        return f"*{c}{v}"
+
+    def __format__(self, name: str) -> str:
+        if not name:
+            return self.__str__()
+
+        fmt = self.__fmt()
+        ptr_to = self.ptr_to
+        if isinstance(ptr_to, (Array, FunctionType)):
+            return ptr_to.__format__(f"({fmt} {name})")
+        else:
+            return f"{ptr_to} {fmt} {name}"
+
+    def __str__(self) -> str:
+        fmt = self.__fmt()
+        ptr_to = self.ptr_to
+        if isinstance(ptr_to, (Array, FunctionType)):
+            return ptr_to.__format__(f"({fmt})")
+        else:
+            return f"{ptr_to} {fmt}"
+
 
 @dataclass
 class Reference:
@@ -252,6 +333,23 @@ class Reference:
     """
 
     ref_to: typing.Union[Array, Pointer, Type]
+
+    def __format__(self, name: str) -> str:
+        if not name:
+            return self.__str__()
+
+        ref_to = self.ref_to
+        if isinstance(ref_to, Array):
+            return ref_to.__format__(f"(& {name})")
+        else:
+            return f"{ref_to}& {name}"
+
+    def __str__(self) -> str:
+        ref_to = self.ref_to
+        if isinstance(ref_to, Array):
+            return ref_to.__format__("(&)")
+        else:
+            return f"{ref_to}&"
 
 
 @dataclass
@@ -262,11 +360,24 @@ class MoveReference:
 
     moveref_to: typing.Union[Array, Pointer, Type]
 
+    def __format__(self, name: str) -> str:
+        if not name:
+            return self.__str__()
+        return f"{self.moveref_to} && {name}"
+
+    def __str__(self) -> str:
+        return f"{self.moveref_to} &&"
+
 
 #: A type or function type that is decorated with various things
 #:
 #: .. note:: There can only be one of FunctionType or Type in a DecoratedType
 #:           chain
+#:
+#: The ``__str__`` for these types returns a canonical representation of
+#: the underlying type. To get a declaration (such as a parameter), use the
+#: ``__format__`` function or an f-string with the name as the format
+#: specifier (``f"{type:name}``)
 DecoratedType = typing.Union[Array, Pointer, MoveReference, Reference, Type]
 
 
@@ -449,6 +560,16 @@ class Parameter:
     name: typing.Optional[str] = None
     default: typing.Optional[Value] = None
     param_pack: bool = False
+
+    def __str__(self):
+
+        default = f" = {self.default}" if self.default else ""
+        pp = "... " if self.param_pack else ""
+        name = self.name
+        if name:
+            return f"{self.type:{pp}{name}}{default}"
+        else:
+            return f"{self.type}{pp}{default}"
 
 
 @dataclass
